@@ -85,6 +85,12 @@ app.get('/api/job/:jobId', (req, res) => {
   if (!job) {
     return res.status(404).json({ error: 'Job not found' });
   }
+
+  const resultsCount = job.results.length;
+  // Get the last 10 results instead of the first 10
+  const lastTenResults = resultsCount <= 10 
+    ? job.results.slice(0) // Return all if less than 10
+    : job.results.slice(resultsCount - 10, resultsCount); // Return the last 10 items
   
   // Calculate average processing time and success ratio
   let avgProcessingTime = 0;
@@ -129,7 +135,7 @@ app.get('/api/job/:jobId', (req, res) => {
     eta: eta, // Estimated time remaining in seconds
     processingSpeed: job.processingSpeed ? job.processingSpeed.toFixed(4) : null, // Companies per second
     // Return the first 10 results for preview
-    preview: job.results.slice(0, 10)
+    preview: lastTenResults
   });
 });
 
