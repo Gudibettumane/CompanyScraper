@@ -316,8 +316,7 @@ async function processJob(jobId) {
       fs.mkdirSync(resultsDir, { recursive: true });
     }
     
-    // Write CSV header with additional stats
-    fs.writeFileSync(csvPath, 'Company,Website,ProcessingTimeMs\n', 'utf-8');
+    fs.writeFileSync(csvPath, 'Company,Website\n', 'utf-8');
     
     // Process each company and update the CSV file after each one
     for (let i = 0; i < companies.length; i++) {
@@ -443,13 +442,13 @@ async function processJob(jobId) {
       
       // Safely append this entry to the CSV file
       try {
-        const safeCsvLine = `"${company.replace(/"/g, '""')}","${(website || '').replace(/"/g, '""')}",${processingTime}\n`;
+        const safeCsvLine = `"${company.replace(/"/g, '""')}","${(website || '').replace(/"/g, '""')}"\n`;
         fs.appendFileSync(csvPath, safeCsvLine, 'utf-8');
       } catch (writeError) {
         console.error(`Error writing to CSV for ${company}:`, writeError.message);
         // Try one more time with a more sanitized approach
         try {
-          const emergencySafeLine = `"${company.replace(/[^\w\s]/g, ' ').replace(/"/g, '')}","${(website || '').replace(/[^\w\s:./\\-]/g, '').replace(/"/g, '')}",${processingTime}\n`;
+          const emergencySafeLine = `"${company.replace(/[^\w\s]/g, ' ').replace(/"/g, '')}","${(website || '').replace(/[^\w\s:./\\-]/g, '').replace(/"/g, '')}"\n`;
           fs.appendFileSync(csvPath, emergencySafeLine, 'utf-8');
         } catch (finalError) {
           console.error(`Failed final attempt to write ${company} to CSV:`, finalError.message);
