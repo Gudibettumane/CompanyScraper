@@ -167,6 +167,14 @@
         setActiveTab('details');
       };
       
+      // Helper function to safely format a number with fallback
+      const safeToFixed = (number, digits) => {
+        if (number === null || number === undefined || isNaN(number)) {
+          return '--';
+        }
+        return Number(number).toFixed(digits);
+      };
+      
       // Helper function to format time in mm:ss format or hh:mm:ss for longer durations
       const formatTime = (seconds) => {
         if (!seconds || isNaN(seconds)) return '--:--';
@@ -461,22 +469,22 @@
                 </div>
                 <div>
                   <p className="text-sm text-gray-600">Avg. Process Time</p>
-                  <p className="font-medium">{currentJob.avgProcessingTime || 0} ms</p>
+                  <p className="font-medium">{currentJob.avgProcessingTime ? safeToFixed(currentJob.avgProcessingTime, 0) : 0} ms</p>
                 </div>
               </div>
               
-              {/* Processing speed information */}
-              {currentJob.processingSpeed && (
+              {/* Processing speed information - FIX: Add extra checks to prevent errors */}
+              {currentJob.processingSpeed && typeof currentJob.processingSpeed === 'number' && !isNaN(currentJob.processingSpeed) ? (
                 <div className="mb-6">
                   <p className="text-sm text-gray-600">Processing Speed</p>
                   <p className="font-medium">
-                    {(currentJob.processingSpeed * 60).toFixed(2)} companies per minute
+                    {safeToFixed(currentJob.processingSpeed * 60, 2)} companies per minute
                     <span className="text-xs text-gray-500 ml-2">
-                      ({currentJob.processingSpeed.toFixed(4)} per second)
+                      ({safeToFixed(currentJob.processingSpeed, 4)} per second)
                     </span>
                   </p>
                 </div>
-              )}
+              ) : null}
               
               {currentJob.currentCompany && currentJob.status === 'processing' && (
                 <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded">
