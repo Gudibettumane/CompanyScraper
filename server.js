@@ -7,6 +7,7 @@ const fs = require('fs');
 const ExcelJS = require('exceljs');
 const puppeteer = require('puppeteer');
 const { v4: uuidv4 } = require('uuid');
+const { networkInterfaces } = require('os');
 
 const app = express();
 const port = 3000;
@@ -286,9 +287,41 @@ app.get('*', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
+// Helper function to get all local IP addresses
+function getLocalIPs() {
+  const interfaces = networkInterfaces();
+  const ipAddresses = [];
+  
+  for (const interfaceName in interfaces) {
+    const interfaceInfo = interfaces[interfaceName];
+    
+    for (const iface of interfaceInfo) {
+      // Skip over non-IPv4 and internal (loopback) addresses
+      if (iface.family === 'IPv4' && !iface.internal) {
+        ipAddresses.push(iface.address);
+      }
+    }
+  }
+  
+  return ipAddresses;
+}
+
 // Start server
 app.listen(port, '0.0.0.0', () => {
-  console.log(`Server running at http://0.0.0.0:${port}`);
-  console.log(`Access from other devices using your computer's IP address`);
-  console.log(`For example: http://192.168.x.x:${port}`);
+  console.log(`\n=== Company Website Scraper Server ===`);
+  console.log(`Server running at http://localhost:${port}`);
+  
+  // Get and display all local IP addresses
+  const ipAddresses = getLocalIPs();
+  
+  if (ipAddresses.length > 0) {
+    console.log(`\nAccess from other devices using one of these URLs:`);
+    ipAddresses.forEach(ip => {
+      console.log(`http://${ip}:${port}`);
+    });
+  } else {
+    console.log(`\nNo network interfaces found. Make sure you're connected to a network.`);
+  }
+  
+  console.log(`\nPress Ctrl+C to stop the server`);
 });
