@@ -167,11 +167,20 @@
         setActiveTab('details');
       };
       
-      // Helper function to format time in mm:ss format
+      // Helper function to format time in mm:ss format or hh:mm:ss for longer durations
       const formatTime = (seconds) => {
-        const mins = Math.floor(seconds / 60);
+        if (!seconds || isNaN(seconds)) return '--:--';
+        
+        seconds = Math.round(seconds);
+        const hours = Math.floor(seconds / 3600);
+        const mins = Math.floor((seconds % 3600) / 60);
         const secs = Math.floor(seconds % 60);
-        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        
+        if (hours > 0) {
+          return `${hours}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        } else {
+          return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
+        }
       };
 
       return (
@@ -269,6 +278,9 @@
                           Time
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          ETA
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Actions
                         </th>
                       </tr>
@@ -305,6 +317,9 @@
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                             {job.totalDuration ? formatTime(job.totalDuration) : '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {job.status === 'processing' && job.eta ? formatTime(job.eta) : '-'}
                           </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             {job.status === 'uploaded' && (
@@ -405,6 +420,31 @@
                 </div>
               </div>
               
+              {/* ETA Information */}
+              {currentJob.status === 'processing' && currentJob.eta && (
+                <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded">
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <p className="text-sm text-gray-600">Estimated Time Remaining</p>
+                      <p className="font-medium text-blue-700">{formatTime(currentJob.eta)}</p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600">Estimated Completion</p>
+                      <p className="font-medium text-blue-700">
+                        {(() => {
+                          if (currentJob.eta) {
+                            const now = new Date();
+                            const completionTime = new Date(now.getTime() + (currentJob.eta * 1000));
+                            return completionTime.toLocaleTimeString();
+                          }
+                          return '-';
+                        })()}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+              
               {/* Stats in a grid */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 bg-gray-50 p-4 rounded">
                 <div>
@@ -424,6 +464,19 @@
                   <p className="font-medium">{currentJob.avgProcessingTime || 0} ms</p>
                 </div>
               </div>
+              
+              {/* Processing speed information */}
+              {currentJob.processingSpeed && (
+                <div className="mb-6">
+                  <p className="text-sm text-gray-600">Processing Speed</p>
+                  <p className="font-medium">
+                    {(currentJob.processingSpeed * 60).toFixed(2)} companies per minute
+                    <span className="text-xs text-gray-500 ml-2">
+                      ({currentJob.processingSpeed.toFixed(4)} per second)
+                    </span>
+                  </p>
+                </div>
+              )}
               
               {currentJob.currentCompany && currentJob.status === 'processing' && (
                 <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded">

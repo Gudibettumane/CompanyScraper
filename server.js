@@ -1,4 +1,3 @@
-// server.js - Backend Node.js server
 const express = require('express');
 const multer = require('multer');
 const cors = require('cors');
@@ -65,7 +64,10 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     total: 0,
     successCount: 0,
     failureCount: 0,
-    companyTimes: [] // Array to store processing time for each company
+    companyTimes: [], // Array to store processing time for each company
+    estimatedTimeRemaining: null, // Store estimated time remaining
+    lastSpeedCalculation: null, // Last time we calculated processing speed
+    processingSpeed: null // Companies per second
   });
   
   return res.json({
@@ -101,6 +103,16 @@ app.get('/api/job/:jobId', (req, res) => {
   // Calculate success ratio
   const successRatio = job.processed > 0 ? (job.successCount / job.processed) * 100 : 0;
   
+  // Calculate ETA
+  let eta = null;
+  if (job.status === 'processing' && job.processingSpeed > 0 && job.total > 0 && job.processed > 0) {
+    // How many companies are left
+    const remaining = job.total - job.processed;
+    // How many seconds it will take to process them
+    const secondsRemaining = remaining / job.processingSpeed;
+    eta = secondsRemaining;
+  }
+  
   return res.json({
     jobId,
     status: job.status,
@@ -114,6 +126,8 @@ app.get('/api/job/:jobId', (req, res) => {
     successRatio: successRatio.toFixed(2),
     avgProcessingTime: avgProcessingTime.toFixed(2),
     totalDuration: totalDuration.toFixed(2),
+    eta: eta, // Estimated time remaining in seconds
+    processingSpeed: job.processingSpeed ? job.processingSpeed.toFixed(4) : null, // Companies per second
     // Return the first 10 results for preview
     preview: job.results.slice(0, 10)
   });
@@ -141,6 +155,8 @@ app.post('/api/process/:jobId', async (req, res) => {
   job.progress = 0;
   job.startTime = new Date();
   job.endTime = null;
+  job.lastSpeedCalculation = new Date();
+  job.processingSpeed = null;
   
   // Process in background
   processJob(jobId).catch(error => {
@@ -201,6 +217,16 @@ app.get('/api/jobs', (req, res) => {
       totalDuration = (endTimeToUse - job.startTime) / 1000; // in seconds
     }
     
+    // Calculate ETA
+    let eta = null;
+    if (job.status === 'processing' && job.processingSpeed > 0 && job.total > 0 && job.processed > 0) {
+      // How many companies are left
+      const remaining = job.total - job.processed;
+      // How many seconds it will take to process them
+      const secondsRemaining = remaining / job.processingSpeed;
+      eta = secondsRemaining;
+    }
+    
     jobs.push({
       jobId,
       status: job.status,
@@ -209,7 +235,8 @@ app.get('/api/jobs', (req, res) => {
       resultCount: job.results ? job.results.length : 0,
       processed: job.processed || 0,
       total: job.total || 0,
-      totalDuration: totalDuration.toFixed(2)
+      totalDuration: totalDuration.toFixed(2),
+      eta: eta
     });
   });
   
@@ -427,6 +454,24 @@ async function processJob(jobId) {
         } catch (finalError) {
           console.error(`Failed final attempt to write ${company} to CSV:`, finalError.message);
         }
+      }
+      
+      // Update processing speed and ETA calculation every 5 companies or 30 seconds
+      const now = new Date();
+      const secondsSinceLastCalculation = (now - job.lastSpeedCalculation) / 1000;
+      
+      if (i > 0 && (i % 5 === 0 || secondsSinceLastCalculation > 30)) {
+        // Calculate speed: companies processed per second
+        const elapsedSeconds = (now - job.startTime) / 1000;
+        job.processingSpeed = job.processed / elapsedSeconds;
+        
+        // Calculate ETA
+        if (job.processingSpeed > 0) {
+          const remaining = total - job.processed;
+          job.estimatedTimeRemaining = remaining / job.processingSpeed;
+        }
+        
+        job.lastSpeedCalculation = now;
       }
       
       // Add a small delay between requests to avoid rate limiting
