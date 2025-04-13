@@ -57,7 +57,15 @@ app.post('/api/upload', upload.single('file'), (req, res) => {
     status: 'uploaded',
     progress: 0,
     currentCompany: '',
-    results: []
+    results: [],
+    shouldStop: false,
+    startTime: null,
+    endTime: null,
+    processed: 0,
+    total: 0,
+    successCount: 0,
+    failureCount: 0,
+    companyTimes: [] // Array to store processing time for each company
   });
   
   return res.json({
@@ -76,12 +84,36 @@ app.get('/api/job/:jobId', (req, res) => {
     return res.status(404).json({ error: 'Job not found' });
   }
   
+  // Calculate average processing time and success ratio
+  let avgProcessingTime = 0;
+  if (job.companyTimes.length > 0) {
+    const sum = job.companyTimes.reduce((a, b) => a + b, 0);
+    avgProcessingTime = sum / job.companyTimes.length;
+  }
+  
+  // Calculate total duration
+  let totalDuration = 0;
+  if (job.startTime) {
+    const endTimeToUse = job.endTime || new Date();
+    totalDuration = (endTimeToUse - job.startTime) / 1000; // in seconds
+  }
+  
+  // Calculate success ratio
+  const successRatio = job.processed > 0 ? (job.successCount / job.processed) * 100 : 0;
+  
   return res.json({
     jobId,
     status: job.status,
     progress: job.progress,
     currentCompany: job.currentCompany,
     resultCount: job.results.length,
+    processed: job.processed,
+    total: job.total,
+    successCount: job.successCount, 
+    failureCount: job.failureCount,
+    successRatio: successRatio.toFixed(2),
+    avgProcessingTime: avgProcessingTime.toFixed(2),
+    totalDuration: totalDuration.toFixed(2),
     // Return the first 10 results for preview
     preview: job.results.slice(0, 10)
   });
@@ -101,9 +133,14 @@ app.post('/api/process/:jobId', async (req, res) => {
     return res.json({ success: false, message: 'Job is already processing' });
   }
   
+  // Reset stop flag
+  job.shouldStop = false;
+  
   // Update job status
   job.status = 'processing';
   job.progress = 0;
+  job.startTime = new Date();
+  job.endTime = null;
   
   // Process in background
   processJob(jobId).catch(error => {
@@ -112,10 +149,29 @@ app.post('/api/process/:jobId', async (req, res) => {
     if (job) {
       job.status = 'error';
       job.error = error.message;
+      job.endTime = new Date();
     }
   });
   
   return res.json({ success: true });
+});
+
+// API: Stop processing a job
+app.post('/api/stop/:jobId', (req, res) => {
+  const jobId = req.params.jobId;
+  const job = activeJobs.get(jobId);
+  
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
+  }
+  
+  // Set the stop flag
+  job.shouldStop = true;
+  
+  return res.json({ 
+    success: true, 
+    message: 'Stop signal sent. The job will stop after the current company is processed.' 
+  });
 });
 
 // API: Download results
@@ -123,8 +179,8 @@ app.get('/api/download/:jobId', (req, res) => {
   const jobId = req.params.jobId;
   const job = activeJobs.get(jobId);
   
-  if (!job || job.status !== 'completed') {
-    return res.status(404).json({ error: 'Completed job not found' });
+  if (!job) {
+    return res.status(404).json({ error: 'Job not found' });
   }
   
   const csvPath = job.csvPath;
@@ -139,12 +195,21 @@ app.get('/api/download/:jobId', (req, res) => {
 app.get('/api/jobs', (req, res) => {
   const jobs = [];
   activeJobs.forEach((job, jobId) => {
+    let totalDuration = 0;
+    if (job.startTime) {
+      const endTimeToUse = job.endTime || new Date();
+      totalDuration = (endTimeToUse - job.startTime) / 1000; // in seconds
+    }
+    
     jobs.push({
       jobId,
       status: job.status,
       progress: job.progress,
       fileName: path.basename(job.filePath),
-      resultCount: job.results ? job.results.length : 0
+      resultCount: job.results ? job.results.length : 0,
+      processed: job.processed || 0,
+      total: job.total || 0,
+      totalDuration: totalDuration.toFixed(2)
     });
   });
   
@@ -187,6 +252,10 @@ async function processJob(jobId) {
     });
     
     const total = companies.length;
+    job.total = total;
+    job.processed = 0;
+    job.successCount = 0;
+    job.failureCount = 0;
     
     // Launch browser
     const browser = await puppeteer.launch({
@@ -220,18 +289,29 @@ async function processJob(jobId) {
       fs.mkdirSync(resultsDir, { recursive: true });
     }
     
-    // Write CSV header
-    fs.writeFileSync(csvPath, 'Company,Website\n', 'utf-8');
+    // Write CSV header with additional stats
+    fs.writeFileSync(csvPath, 'Company,Website,ProcessingTimeMs\n', 'utf-8');
     
     // Process each company and update the CSV file after each one
     for (let i = 0; i < companies.length; i++) {
+      // Check if we should stop
+      if (job.shouldStop) {
+        console.log(`Job ${jobId} stopped by user after processing ${i} companies`);
+        job.status = 'stopped';
+        job.endTime = new Date();
+        break;
+      }
+      
       const company = companies[i];
+      const companyStartTime = Date.now();
       
       // Update job status
       job.progress = Math.floor(((i + 1) / total) * 100);
       job.currentCompany = company;
+      job.processed = i + 1;
       
       let website = '';
+      let success = false;
       
       try {
         // Create a sanitized search query - remove or replace problematic characters
@@ -307,24 +387,42 @@ async function processJob(jobId) {
             break;
           }
         }
+        
+        // If we found a website, consider it success
+        success = !!website;
       } catch (error) {
         console.error(`Error processing ${company}:`, error.message);
-        // We'll continue with an empty website value in this case
+        success = false;
+      }
+      
+      // Calculate processing time for this company
+      const processingTime = Date.now() - companyStartTime;
+      job.companyTimes.push(processingTime);
+      
+      // Update success/failure counts
+      if (success) {
+        job.successCount++;
+      } else {
+        job.failureCount++;
       }
       
       // Always add result to the job's result array, even if there was an error
-      const result = { company, website };
+      const result = { 
+        company, 
+        website, 
+        processingTime 
+      };
       job.results.push(result);
       
       // Safely append this entry to the CSV file
       try {
-        const safeCsvLine = `"${company.replace(/"/g, '""')}","${(website || '').replace(/"/g, '""')}"\n`;
+        const safeCsvLine = `"${company.replace(/"/g, '""')}","${(website || '').replace(/"/g, '""')}",${processingTime}\n`;
         fs.appendFileSync(csvPath, safeCsvLine, 'utf-8');
       } catch (writeError) {
         console.error(`Error writing to CSV for ${company}:`, writeError.message);
         // Try one more time with a more sanitized approach
         try {
-          const emergencySafeLine = `"${company.replace(/[^\w\s]/g, ' ').replace(/"/g, '')}","${(website || '').replace(/[^\w\s:./\\-]/g, '').replace(/"/g, '')}"\n`;
+          const emergencySafeLine = `"${company.replace(/[^\w\s]/g, ' ').replace(/"/g, '')}","${(website || '').replace(/[^\w\s:./\\-]/g, '').replace(/"/g, '')}",${processingTime}\n`;
           fs.appendFileSync(csvPath, emergencySafeLine, 'utf-8');
         } catch (finalError) {
           console.error(`Failed final attempt to write ${company} to CSV:`, finalError.message);
@@ -338,9 +436,13 @@ async function processJob(jobId) {
     // Close browser
     await browser.close();
     
-    // Update job status to completed
-    job.status = 'completed';
-    job.progress = 100;
+    // Update job status to completed if not stopped
+    if (job.status !== 'stopped') {
+      job.status = 'completed';
+    }
+    
+    job.progress = Math.floor((job.processed / total) * 100);
+    job.endTime = new Date();
     job.csvPath = csvPath;
     job.csvFilename = csvFilename;
     
@@ -348,6 +450,7 @@ async function processJob(jobId) {
     console.error('Error processing file:', error);
     job.status = 'error';
     job.error = error.message;
+    job.endTime = new Date();
     
     // Even if there's a general error, we don't throw it
     // This allows the job to be marked as error but doesn't crash the server

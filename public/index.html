@@ -21,6 +21,7 @@
       const [activeJobs, setActiveJobs] = React.useState([]);
       const [currentJob, setCurrentJob] = React.useState(null);
       const [refreshInterval, setRefreshInterval] = React.useState(null);
+      const [isStopping, setIsStopping] = React.useState(false);
 
       // Load jobs on initial render
       React.useEffect(() => {
@@ -66,6 +67,11 @@
           const response = await fetch(`/api/job/${jobId}`);
           const data = await response.json();
           setCurrentJob(data);
+          
+          // Reset stopping flag if job is no longer processing
+          if (data.status !== 'processing') {
+            setIsStopping(false);
+          }
         } catch (error) {
           console.error('Error fetching job details:', error);
         }
@@ -131,6 +137,25 @@
           console.error('Error starting job:', error);
         }
       };
+      
+      const stopProcessing = async (jobId) => {
+        setIsStopping(true);
+        try {
+          const response = await fetch(`/api/stop/${jobId}`, {
+            method: 'POST',
+          });
+          
+          const data = await response.json();
+          
+          if (data.success) {
+            fetchJobDetails(jobId);
+            fetchJobs();
+          }
+        } catch (error) {
+          console.error('Error stopping job:', error);
+          setIsStopping(false);
+        }
+      };
 
       const downloadResults = (jobId) => {
         window.location.href = `/api/download/${jobId}`;
@@ -140,6 +165,13 @@
         fetchJobDetails(job.jobId);
         setCurrentJob(job);
         setActiveTab('details');
+      };
+      
+      // Helper function to format time in mm:ss format
+      const formatTime = (seconds) => {
+        const mins = Math.floor(seconds / 60);
+        const secs = Math.floor(seconds % 60);
+        return `${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
       };
 
       return (
@@ -231,6 +263,12 @@
                           Progress
                         </th>
                         <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Processing
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                          Time
+                        </th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                           Actions
                         </th>
                       </tr>
@@ -245,8 +283,9 @@
                             <span className={`px-2 inline-flex text-xs leading-5 font-semibold rounded-full 
                               ${job.status === 'completed' ? 'bg-green-100 text-green-800' : 
                                 job.status === 'processing' ? 'bg-blue-100 text-blue-800' :
+                                job.status === 'stopped' ? 'bg-yellow-100 text-yellow-800' :
                                 job.status === 'error' ? 'bg-red-100 text-red-800' : 
-                                'bg-yellow-100 text-yellow-800'}`}>
+                                'bg-gray-100 text-gray-800'}`}>
                               {job.status}
                             </span>
                           </td>
@@ -259,6 +298,14 @@
                             </div>
                             <span className="text-xs">{job.progress}%</span>
                           </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {job.processed && job.total ? 
+                              `${job.processed} of ${job.total}` : 
+                              '-'}
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                            {job.totalDuration ? formatTime(job.totalDuration) : '-'}
+                          </td>
                           <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
                             {job.status === 'uploaded' && (
                               <button
@@ -268,7 +315,15 @@
                                 Start Processing
                               </button>
                             )}
-                            {job.status === 'completed' && (
+                            {job.status === 'processing' && (
+                              <button
+                                onClick={() => stopProcessing(job.jobId)}
+                                className="text-yellow-600 hover:text-yellow-900 mr-4"
+                              >
+                                Stop Processing
+                              </button>
+                            )}
+                            {(job.status === 'completed' || job.status === 'stopped') && (
                               <button
                                 onClick={() => downloadResults(job.jobId)}
                                 className="text-green-600 hover:text-green-900 mr-4"
@@ -297,24 +352,36 @@
             <div className="bg-white p-6 rounded-lg shadow-md">
               <div className="flex justify-between items-center mb-6">
                 <h2 className="text-xl font-semibold">Job Details</h2>
-                {currentJob.status === 'completed' && (
-                  <button
-                    onClick={() => downloadResults(currentJob.jobId)}
-                    className="bg-green-600 text-white py-1 px-4 rounded hover:bg-green-700"
-                  >
-                    Download CSV
-                  </button>
-                )}
+                <div>
+                  {currentJob.status === 'processing' && (
+                    <button
+                      onClick={() => stopProcessing(currentJob.jobId)}
+                      disabled={isStopping}
+                      className={`mr-3 ${isStopping ? 'bg-gray-400' : 'bg-yellow-600 hover:bg-yellow-700'} text-white py-1 px-4 rounded`}
+                    >
+                      {isStopping ? 'Stopping...' : 'Stop Processing'}
+                    </button>
+                  )}
+                  {(currentJob.status === 'completed' || currentJob.status === 'stopped') && (
+                    <button
+                      onClick={() => downloadResults(currentJob.jobId)}
+                      className="bg-green-600 text-white py-1 px-4 rounded hover:bg-green-700"
+                    >
+                      Download CSV
+                    </button>
+                  )}
+                </div>
               </div>
               
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
                 <div>
                   <p className="text-sm text-gray-600">Status</p>
                   <p className={`font-medium 
                     ${currentJob.status === 'completed' ? 'text-green-600' : 
                       currentJob.status === 'processing' ? 'text-blue-600' : 
+                      currentJob.status === 'stopped' ? 'text-yellow-600' : 
                       currentJob.status === 'error' ? 'text-red-600' : 
-                      'text-yellow-600'}`}>
+                      'text-gray-600'}`}>
                     {currentJob.status}
                   </p>
                 </div>
@@ -326,12 +393,40 @@
                       style={{ width: `${currentJob.progress}%` }}
                     ></div>
                   </div>
-                  <span className="text-xs">{currentJob.progress}%</span>
+                  <span className="text-xs mt-1 inline-block">
+                    {currentJob.progress}% ({currentJob.processed} of {currentJob.total})
+                  </span>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Total Duration</p>
+                  <p className="font-medium">
+                    {currentJob.totalDuration ? formatTime(currentJob.totalDuration) : '-'}
+                  </p>
                 </div>
               </div>
               
-              {currentJob.currentCompany && (
-                <div className="mb-6">
+              {/* Stats in a grid */}
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6 bg-gray-50 p-4 rounded">
+                <div>
+                  <p className="text-sm text-gray-600">Successful Lookups</p>
+                  <p className="font-medium text-green-600">{currentJob.successCount || 0}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Failed Lookups</p>
+                  <p className="font-medium text-red-600">{currentJob.failureCount || 0}</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Success Rate</p>
+                  <p className="font-medium">{currentJob.successRatio || 0}%</p>
+                </div>
+                <div>
+                  <p className="text-sm text-gray-600">Avg. Process Time</p>
+                  <p className="font-medium">{currentJob.avgProcessingTime || 0} ms</p>
+                </div>
+              </div>
+              
+              {currentJob.currentCompany && currentJob.status === 'processing' && (
+                <div className="mb-6 p-3 bg-blue-50 border border-blue-200 rounded">
                   <p className="text-sm text-gray-600">Currently Processing</p>
                   <p className="font-medium">{currentJob.currentCompany}</p>
                 </div>
@@ -366,6 +461,9 @@
                           <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                             Website
                           </th>
+                          <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                            Process Time
+                          </th>
                         </tr>
                       </thead>
                       <tbody className="bg-white divide-y divide-gray-200">
@@ -383,6 +481,9 @@
                                 <span className="text-gray-500">No website found</span>
                               )}
                             </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-600">
+                              {result.processingTime ? `${result.processingTime} ms` : '-'}
+                            </td>
                           </tr>
                         ))}
                       </tbody>
@@ -392,7 +493,7 @@
                   {currentJob.resultCount > currentJob.preview.length && (
                     <p className="mt-2 text-sm text-gray-500">
                       Showing {currentJob.preview.length} of {currentJob.resultCount} results.
-                      {currentJob.status === 'completed' && ' Download the CSV for all results.'}
+                      {(currentJob.status === 'completed' || currentJob.status === 'stopped') && ' Download the CSV for all results.'}
                     </p>
                   )}
                 </div>
